@@ -126,19 +126,19 @@ def main(args):
 		fileSize = path.getsize(footerFile)
 		assert (fileSize >= 16384), "Input file '%s' must be at least 16384 bytes" % footerFile
 		
+		# retrive the key and salt from the footer file
+		cf = getCryptoData(footerFile)
+
+		# load the header data for testing the password
+		headerData = open(headerFile, 'rb').read(32)
+
 		for n in xrange(4, maxpin_digits+1):
-			result = bruteforcePIN(headerFile, footerFile, n)
+			result = bruteforcePIN(headerData, cf, n)
 			if result: 
 				print 'Found PIN!: ' + result
 				break
 
-def bruteforcePIN(headerFile, footerFile, maxdigits):
-	# retrive the key and salt from the footer file
-	cf = getCryptoData(footerFile)
-
-	# load the header data for testing the password
-	headerData = open(headerFile, 'rb').read(32)
-
+def bruteforcePIN(headerData, cryptoFooter, maxdigits):
 	print 'Trying to Bruteforce Password... please wait'
 
 	# try all possible 4 to maxdigits digit PINs, returns value immediately when found 
@@ -158,10 +158,10 @@ def bruteforcePIN(headerFile, footerFile, maxdigits):
 		
 		# make the decryption key from the password
 		decKey = ''
-		if cf.kdf == KDF_PBKDF: 
-			decKey = decryptDecodePbkdf2Key(cf, passwdTry)
-		elif cf.kdf == KDF_SCRYPT:
-			decKey = decryptDecodeScryptKey(cf, passwdTry)
+		if cryptoFooter.kdf == KDF_PBKDF: 
+			decKey = decryptDecodePbkdf2Key(cryptoFooter, passwdTry)
+		elif cryptoFooter.kdf == KDF_SCRYPT:
+			decKey = decryptDecodeScryptKey(cryptoFooter, passwdTry)
 		else:
 			raise "Unknown KDF: " + cf.kdf
 		
@@ -222,4 +222,4 @@ def decryptData(decKey,essiv,data):
 	return decData
 
 if __name__ == "__main__": 
-  main(sys.argv)
+	main(sys.argv)
