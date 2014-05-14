@@ -39,6 +39,9 @@ KDF_SCRYPT = 2
 
 class CryptoFooter:
 
+	def __init__(self):
+		self.kdf = KDF_PBKDF
+
 	def unpack(self, data):
 		# structure taken from cryptfs.h in crespo source.
 		s = Struct('<'+'L H H')
@@ -50,7 +53,7 @@ class CryptoFooter:
 			self.fsSize1, self.fsSize2, self.failedDecrypt, self.cryptoType, 
 			self.spare2, self.cryptoKey, self.cryptoSalt) = s.unpack_from(data)
 
-			self.cryptoKey = self.cryptoKey[0:keySize]
+			self.cryptoKey = self.cryptoKey[0:self.keySize]
 		else:
 			s = Struct('<'+'L H H L L L L L L L 64s L 48s 16s 2Q L B B B B')
 			(self.ftrMagic, self.majorVersion, self.minorVersion, self.ftrSize,
