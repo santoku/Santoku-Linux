@@ -15,6 +15,8 @@
 # ------------
 # Added support for more than 4-digit PINs
 # Speed improvements
+# ------------
+# 2014/5/14 Added 4.4 support (scrypt, etc.) [Nikolay Elenkov]
 # -- 
 
 from os import path
@@ -23,6 +25,7 @@ import time
 from struct import Struct
 from M2Crypto import EVP
 import hashlib
+import scrypt
 
 
 HASH_COUNT    = 2000
@@ -30,7 +33,59 @@ KEY_LEN_BYTES = 16
 IV_LEN_BYTES  = 16
 SECTOR_START  = 1
 
+SCRYPT_ADDED_MINOR = 2
+KDF_PBKDF = 1
+KDF_SCRYPT = 2
 
+class CryptoFooter:
+
+	def unpack(self, data):
+		# structure taken from cryptfs.h in crespo source.
+		s = Struct('<'+'L H H')
+		ftrMagic, majorVersion, minorVersion = s.unpack_from(data)
+		if minorVersion < SCRYPT_ADDED_MINOR:
+			s = Struct('<'+'L H H L L L L L L L 64s L 48s 16s')
+			(self.ftrMagic, self.majorVersion, self.minorVersion, 
+			self.ftrSize, self.flags, self.keySize, self.spare1, 
+			self.fsSize1, self.fsSize2, self.failedDecrypt, self.cryptoType, 
+			self.spare2, self.cryptoKey, self.cryptoSalt) = s.unpack_from(data)
+
+			self.cryptoKey = self.cryptoKey[0:keySize]
+		else:
+			s = Struct('<'+'L H H L L L L L L L 64s L 48s 16s 2Q L B B B B')
+			(self.ftrMagic, self.majorVersion, self.minorVersion, self.ftrSize,
+ 			self.flags, self.keySize, self.spare1, self.fsSize1, self.fsSize2, 
+			self.failedDecrypt, self.cryptoType, self.spare2, self.cryptoKey, 
+			self.cryptoSalt, self.persistDataOffset1, self.persistDataOffset2, 
+			self.persistDataSize, self.kdf, self.N_factor, self.r_factor, 
+			self.p_factor) = s.unpack_from(data)
+
+			self.cryptoKey = self.cryptoKey[0:self.keySize]
+			self.N = 1 << self.N_factor
+			self.r = 1 << self.r_factor
+			self.p = 1 << self.p_factor
+
+	def dump(self):
+		print "Android FDE crypto footer"
+		print '-------------------------'
+		print 'Magic          :', "0x%0.8X" % self.ftrMagic
+		print 'Major Version  :', self.majorVersion
+		print 'Minor Version  :', self.minorVersion
+		print 'Footer Size    :', self.ftrSize, "bytes"
+		print 'Flags          :', "0x%0.8X" % self.flags
+		print 'Key Size       :', self.keySize * 8, "bits"
+		print 'Failed Decrypts:', self.failedDecrypt
+		print 'Crypto Type    :', self.cryptoType.rstrip("\0")
+		print 'Encrypted Key  :', "0x" + self.cryptoKey.encode("hex").upper()
+		print 'Salt           :', "0x" + self.cryptoSalt.encode("hex").upper()
+		if self.minorVersion >= SCRYPT_ADDED_MINOR:
+			print 'KDF            :', "PBKDF2" if self.kdf == KDF_PBKDF else "scrypt"
+			print 'N_factor       :', "%u	(N=%u)" % (self.N_factor, self.N)
+			print 'r_factor       :', "%u	(r=%u)" % (self.r_factor, self.r)
+			print 'p_factor       :', "%u	(p=%u)" % (self.p_factor, self.p)
+		print '-------------------------'
+		
+		
 def main(args):
 	# default value 
 	maxpin_digits = 4
@@ -79,7 +134,7 @@ def main(args):
 
 def bruteforcePIN(headerFile, footerFile, maxdigits):
 	# retrive the key and salt from the footer file
-	cryptoKey,cryptoSalt = getCryptoData(footerFile)
+	cf = getCryptoData(footerFile)
 
 	# load the header data for testing the password
 	headerData = open(headerFile, 'rb').read(32)
@@ -102,7 +157,13 @@ def bruteforcePIN(headerFile, footerFile, maxdigits):
 		#	pass
 		
 		# make the decryption key from the password
-		decKey = decryptDecodeKey(cryptoKey,cryptoSalt,passwdTry)
+		decKey = ''
+		if cf.kdf == KDF_PBKDF: 
+			decKey = decryptDecodePbkdf2Key(cf, passwdTry)
+		elif cf.kdf == KDF_SCRYPT:
+			decKey = decryptDecodeScryptKey(cf, passwdTry)
+		else:
+			raise "Unknown KDF: " + cf.kdf
 		
 		# try to decrypt the frist 32 bytes of the header data (we don't need the iv)
 		decData = decryptData(decKey,"",headerData)
@@ -117,31 +178,15 @@ def bruteforcePIN(headerFile, footerFile, maxdigits):
 def getCryptoData(filename):
 	data = open(filename, 'rb').read()
 	
-	# structure taken from cryptfs.h in crespo source.
-	s = Struct('<'+'L H H L L L L L L L 64s')
-	ftrMagic, majorVersion, minorVersion, ftrSize, flags, keySize, spare1, fsSize1, fsSize2, failedDecrypt, cryptoType = s.unpack(data[0:100])
+	cf = CryptoFooter()
+	cf.unpack(data)
+	cf.dump()
 
-	cryptoSalt = data[ftrSize+keySize+32:ftrSize+keySize+32+16]
-	cryptoKey = data[ftrSize:ftrSize+keySize]
+	return cf
 
-	print 'Footer File    :', filename;
-	print 'Magic          :', "0x%0.8X" % ftrMagic
-	print 'Major Version  :', majorVersion
-	print 'Minor Version  :', minorVersion
-	print 'Footer Size    :', ftrSize, "bytes"
-	print 'Flags          :', "0x%0.8X" % flags
-	print 'Key Size       :', keySize * 8, "bits"
-	print 'Failed Decrypts:', failedDecrypt
-	print 'Crypto Type    :', cryptoType.rstrip("\0")
-	print 'Encrypted Key  :', "0x" + cryptoKey.encode("hex").upper()
-	print 'Salt           :', "0x" + cryptoSalt.encode("hex").upper()
-	print '----------------'
-
-	return cryptoKey,cryptoSalt
-
-def decryptDecodeKey(cryptoKey,cryptoSalt,password):
+def decryptDecodePbkdf2Key(cf,password):
 	# make the key from the password
-	pbkdf2 = EVP.pbkdf2(password, cryptoSalt, iter=HASH_COUNT, keylen=KEY_LEN_BYTES+IV_LEN_BYTES)
+	pbkdf2 = EVP.pbkdf2(password, cf.cryptoSalt, iter=HASH_COUNT, keylen=KEY_LEN_BYTES+IV_LEN_BYTES)
 
 	key = pbkdf2[:KEY_LEN_BYTES]
 	iv = pbkdf2[KEY_LEN_BYTES:]
@@ -149,7 +194,21 @@ def decryptDecodeKey(cryptoKey,cryptoSalt,password):
 	# do the decrypt
 	cipher = EVP.Cipher(alg='aes_128_cbc', key=key, iv=iv, op=0) # 0 is DEC
 	cipher.set_padding(padding=0)
-	decKey = cipher.update(cryptoKey)
+	decKey = cipher.update(cf.cryptoKey)
+	decKey = decKey + cipher.final()
+	
+	return decKey
+
+def decryptDecodeScryptKey(cf,password):
+	derived = scrypt.hash(password, cf.cryptoSalt, cf.N, cf.r, cf.p)
+
+	key = derived[:KEY_LEN_BYTES]
+	iv = derived[KEY_LEN_BYTES:]
+
+	# do the decrypt
+	cipher = EVP.Cipher(alg='aes_128_cbc', key=key, iv=iv, op=0) # 0 is DEC
+	cipher.set_padding(padding=0)
+	decKey = cipher.update(cf.cryptoKey)
 	decKey = decKey + cipher.final()
 	
 	return decKey
@@ -163,4 +222,4 @@ def decryptData(decKey,essiv,data):
 	return decData
 
 if __name__ == "__main__": 
-    main(sys.argv)		
+  main(sys.argv)
