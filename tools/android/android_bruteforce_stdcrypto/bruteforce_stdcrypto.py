@@ -82,7 +82,12 @@ class CryptoFooter:
 		print 'Encrypted Key  :', "0x" + self.cryptoKey.encode("hex").upper()
 		print 'Salt           :', "0x" + self.cryptoSalt.encode("hex").upper()
 		if self.minorVersion >= SCRYPT_ADDED_MINOR:
-			print 'KDF            :', "PBKDF2" if self.kdf == KDF_PBKDF else "scrypt"
+			if self.kdf == KDF_PBKDF:
+				print 'KDF            :', "PBKDF2"
+			elif self.kdf == KDF_SCRYPT:
+				print 'KDF            :', "scrypt"
+			else:
+				print 'KDF            :', ("unknown (%d)" % self.kdf)
 			print 'N_factor       :', "%u	(N=%u)" % (self.N_factor, self.N)
 			print 'r_factor       :', "%u	(r=%u)" % (self.r_factor, self.r)
 			print 'p_factor       :', "%u	(p=%u)" % (self.p_factor, self.p)
@@ -166,7 +171,7 @@ def bruteforcePIN(headerData, cryptoFooter, maxdigits):
 		elif cryptoFooter.kdf == KDF_SCRYPT:
 			decKey = decryptDecodeScryptKey(cryptoFooter, passwdTry)
 		else:
-			raise "Unknown KDF: " + cf.kdf
+			raise Exception("Unknown KDF: " + str(cryptoFooter.kdf))
 		
 		# try to decrypt the frist 32 bytes of the header data (we don't need the iv)
 		decData = decryptData(decKey,"",headerData)
