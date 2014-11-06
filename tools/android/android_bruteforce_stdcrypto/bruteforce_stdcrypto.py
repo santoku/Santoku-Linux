@@ -36,6 +36,43 @@ SECTOR_START  = 1
 SCRYPT_ADDED_MINOR = 2
 KDF_PBKDF = 1
 KDF_SCRYPT = 2
+KDF_SCRYPT_KEYMASTER_UNPADDED = 3
+KDF_SCRYPT_KEYMASTER_BADLY_PADDED = 4
+KDF_SCRYPT_KEYMASTER = 5
+KDF_NAMES = dict()
+KDF_NAMES[KDF_PBKDF] = "PBKDF2"
+KDF_NAMES[KDF_SCRYPT] = "scrypt"
+KDF_NAMES[KDF_SCRYPT_KEYMASTER_UNPADDED] =  "scrypt+keymaster (padded)"
+KDF_NAMES[KDF_SCRYPT_KEYMASTER_BADLY_PADDED] = "scrypt+keymaster (badly padded)"
+KDF_NAMES[KDF_SCRYPT_KEYMASTER] =  "scrypt+keymaster"
+
+CRYPT_TYPES = ('password', 'default', 'pattern', 'PIN')
+
+class QcomKmKeyBlob:
+	def parse(self,data):
+		s = Struct('<'+'L L 512s L 512s L 16s 512s L 32s')
+		(self.magic_num, self.version_num, 
+         self.modulus, self.modulus_size, 
+		 self.pub_exp, self.pub_exp_size, 
+         self.iv, 
+		 self.enc_priv_exp, self.enc_priv_exp_size,
+		 self.hmac) = s.unpack_from(data)
+
+		self.modulus = self.modulus[0:self.modulus_size]
+		self.pub_exp = self.pub_exp[0:self.pub_exp_size]
+		self.enc_priv_exp = self.enc_priv_exp[0:self.enc_priv_exp_size]
+
+	def dump(self):
+		print "QCOM key blob"
+		print '-------------------------'
+		print "magic num    : 0x%0.4X" % self.magic_num
+		print "version num  : %u" % self.version_num
+		print "modulus      : %s... [%d]" % (self.modulus.encode("hex").upper()[0:32], self.modulus_size)
+		print "pub exp      : %s" % self.pub_exp.encode("hex").upper()
+		print "IV           : %s" % self.iv.encode("hex").upper()
+		print "encr priv exp: %s...[%d]" % (self.enc_priv_exp.encode("hex").upper()[0:32], self.enc_priv_exp_size)
+		print "HMAC         : %s" % self.hmac.encode("hex").upper()
+
 
 class CryptoFooter:
 
@@ -54,7 +91,7 @@ class CryptoFooter:
 			self.spare2, self.cryptoKey, self.cryptoSalt) = s.unpack_from(data)
 
 			self.cryptoKey = self.cryptoKey[0:self.keySize]
-		else:
+		elif minorVersion == SCRYPT_ADDED_MINOR:
 			s = Struct('<'+'L H H L L L L L L L 64s L 48s 16s 2Q L B B B B')
 			(self.ftrMagic, self.majorVersion, self.minorVersion, self.ftrSize,
  			self.flags, self.keySize, self.spare1, self.fsSize1, self.fsSize2, 
@@ -67,31 +104,60 @@ class CryptoFooter:
 			self.N = 1 << self.N_factor
 			self.r = 1 << self.r_factor
 			self.p = 1 << self.p_factor
+		else:
+			s = Struct('<'+'L H H L L L L Q L 64s L 48s 16s 2Q L B B B B Q 32s 2048s L 32s')
+			(self.ftrMagic, self.majorVersion, self.minorVersion, self.ftrSize,
+ 			self.flags, self.keySize, self.crypt_type, self.fsSize, 
+			self.failedDecrypt, self.cryptoType, self.spare2, self.cryptoKey, 
+			self.cryptoSalt, self.persistDataOffset1, self.persistDataOffset2, 
+			self.persistDataSize, self.kdf, self.N_factor, self.r_factor, 
+			self.p_factor, 
+			self.encrypted_upto, 
+			self.hash_first_block, 
+			self.km_blob, self.km_blob_size, 
+			self.scrypted_intermediate_key) = s.unpack_from(data)
+
+			self.cryptoKey = self.cryptoKey[0:self.keySize]
+			self.N = 1 << self.N_factor
+			self.r = 1 << self.r_factor
+			self.p = 1 << self.p_factor
+			self.km_blob = self.km_blob[0:self.km_blob_size]
 
 	def dump(self):
 		print "Android FDE crypto footer"
 		print '-------------------------'
-		print 'Magic          :', "0x%0.8X" % self.ftrMagic
-		print 'Major Version  :', self.majorVersion
-		print 'Minor Version  :', self.minorVersion
-		print 'Footer Size    :', self.ftrSize, "bytes"
-		print 'Flags          :', "0x%0.8X" % self.flags
-		print 'Key Size       :', self.keySize * 8, "bits"
-		print 'Failed Decrypts:', self.failedDecrypt
-		print 'Crypto Type    :', self.cryptoType.rstrip("\0")
-		print 'Encrypted Key  :', "0x" + self.cryptoKey.encode("hex").upper()
-		print 'Salt           :', "0x" + self.cryptoSalt.encode("hex").upper()
+		print 'Magic              :', "0x%0.8X" % self.ftrMagic
+		print 'Major Version      :', self.majorVersion
+		print 'Minor Version      :', self.minorVersion
+		print 'Footer Size        :', self.ftrSize, "bytes"
+		print 'Flags              :', "0x%0.8X" % self.flags
+		print 'Key Size           :', self.keySize * 8, "bits"
+		print 'Failed Decrypts    :', self.failedDecrypt
+		print 'Crypto Type        :', self.cryptoType.rstrip("\0")
+		print 'Encrypted Key      :', "0x" + self.cryptoKey.encode("hex").upper()
+		print 'Salt               :', "0x" + self.cryptoSalt.encode("hex").upper()
 		if self.minorVersion >= SCRYPT_ADDED_MINOR:
-			if self.kdf == KDF_PBKDF:
-				print 'KDF            :', "PBKDF2"
-			elif self.kdf == KDF_SCRYPT:
-				print 'KDF            :', "scrypt"
+			if self.kdf in KDF_NAMES.keys():
+				print 'KDF                : %s' % KDF_NAMES[self.kdf]
 			else:
-				print 'KDF            :', ("unknown (%d)" % self.kdf)
-			print 'N_factor       :', "%u	(N=%u)" % (self.N_factor, self.N)
-			print 'r_factor       :', "%u	(r=%u)" % (self.r_factor, self.r)
-			print 'p_factor       :', "%u	(p=%u)" % (self.p_factor, self.p)
+				print 'KDF                :', ("unknown (%d)" % self.kdf)
+			print 'N_factor           :', "%u	(N=%u)" % (self.N_factor, self.N)
+			print 'r_factor           :', "%u	(r=%u)" % (self.r_factor, self.r)
+			print 'p_factor           :', "%u	(p=%u)" % (self.p_factor, self.p)
+		if self.minorVersion >= KDF_SCRYPT_KEYMASTER_UNPADDED:
+			print 'crypt type         : %s' % CRYPT_TYPES[self.crypt_type]
+			print 'FS size            : %u' % self.fsSize
+			print 'encrypted upto     : %u' % self.encrypted_upto
+			print 'hash first block   : %s' % self.hash_first_block.encode("hex").upper()
+			print 'keymaster blob     : %s...[%d]' % (self.km_blob.encode("hex").upper()[0:32], self.km_blob_size)
+			print 'scrypted IK        : %s' % self.scrypted_intermediate_key.encode("hex").upper()
+
+			print "\n"
+			qb = QcomKmKeyBlob()
+			qb.parse(self.km_blob)
+			qb.dump()
 		print '-------------------------'
+
 		
 		
 def main(args):
@@ -171,7 +237,7 @@ def bruteforcePIN(headerData, cryptoFooter, maxdigits):
 		elif cryptoFooter.kdf == KDF_SCRYPT:
 			decKey = decryptDecodeScryptKey(cryptoFooter, passwdTry)
 		else:
-			raise Exception("Unknown KDF: " + str(cryptoFooter.kdf))
+			raise Exception("Unknown or unsupporeted KDF: " + str(cryptoFooter.kdf))
 		
 		# try to decrypt the frist 32 bytes of the header data (we don't need the iv)
 		decData = decryptData(decKey,"",headerData)
