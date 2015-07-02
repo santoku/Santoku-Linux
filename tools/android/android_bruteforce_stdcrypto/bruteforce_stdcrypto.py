@@ -17,6 +17,8 @@
 # Speed improvements
 # ------------
 # 2014/5/14 Added 4.4 support (scrypt, etc.) [Nikolay Elenkov]
+# ------------
+# 2015/6/29 Implemented ext4 Magic comparison [Oliver Kunz]
 # -- 
 
 from os import path
@@ -47,6 +49,8 @@ KDF_NAMES[KDF_SCRYPT_KEYMASTER_BADLY_PADDED] = "scrypt+keymaster (badly padded)"
 KDF_NAMES[KDF_SCRYPT_KEYMASTER] =  "scrypt+keymaster"
 
 CRYPT_TYPES = ('password', 'default', 'pattern', 'PIN')
+
+EXT4_MAGIC = "53ef"
 
 class QcomKmKeyBlob:
 	def parse(self,data):
@@ -163,6 +167,7 @@ class CryptoFooter:
 def main(args):
 	# default value 
 	maxpin_digits = 4
+	parseMagic = False
 
 	if len(args) < 3:
 		print 'Usage: python bruteforce_stdcrypto.py [header file] [footer file] (max PIN digits)'
@@ -200,19 +205,30 @@ def main(args):
 		fileSize = path.getsize(footerFile)
 		assert (fileSize >= 16384), "Input file '%s' must be at least 16384 bytes" % footerFile
 		
+		# check headerFile
+		fileSize = path.getsize(headerFile)
+		# for the NULL padding check, we need at least 32 bytes
+		assert(fileSize > 32), "Header file '%s' must be at least 32 bytes" % headerFile
+
+		if fileSize >= 1088:
+			parseMagic = True;
+			# load the header data for testing the password
+			headerData = open(headerFile, 'rb').read(1088)
+		else:
+			parseMagic = False;
+			# load the header data for testing the password
+			headerData = open(headerFile, 'rb').read(32)
+		
 		# retrive the key and salt from the footer file
 		cf = getCryptoData(footerFile)
 
-		# load the header data for testing the password
-		headerData = open(headerFile, 'rb').read(32)
-
 		for n in xrange(4, maxpin_digits+1):
-			result = bruteforcePIN(headerData, cf, n)
+			result = bruteforcePIN(headerData, cf, n, parseMagic)
 			if result: 
 				print 'Found PIN!: ' + result
 				break
 
-def bruteforcePIN(headerData, cryptoFooter, maxdigits):
+def bruteforcePIN(headerData, cryptoFooter, maxdigits, parseMagic):
 	print 'Trying to Bruteforce Password... please wait'
 
 	# try all possible 4 to maxdigits digit PINs, returns value immediately when found 
@@ -243,8 +259,14 @@ def bruteforcePIN(headerData, cryptoFooter, maxdigits):
 		decData = decryptData(decKey,"",headerData)
 
 		# has the test worked?
-		if decData[16:32] == "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0":
-			return passwdTry
+		if parseMagic:
+			# ext4 superblock MAGIC (0xef53, little endian) present
+			if decData[1080:1082].encode("hex") == EXT4_MAGIC:
+				return passwdTry
+		else:
+			# headerFile not large enough, only check for NULL padding of ext4 superblock
+			if decData[16:32] == "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0":
+				return passwdTry
 			
 	return None
 
