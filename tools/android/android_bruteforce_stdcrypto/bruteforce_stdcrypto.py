@@ -51,7 +51,6 @@ KDF_NAMES[KDF_SCRYPT_KEYMASTER] =  "scrypt+keymaster"
 CRYPT_TYPES = ('password', 'default', 'pattern', 'PIN')
 
 EXT4_MAGIC = "53ef"
-parseMagic = False
 
 class QcomKmKeyBlob:
 	def parse(self,data):
@@ -166,9 +165,9 @@ class CryptoFooter:
 		
 		
 def main(args):
-	global parseMagic
 	# default value 
 	maxpin_digits = 4
+	parseMagic = False
 
 	if len(args) < 3:
 		print 'Usage: python bruteforce_stdcrypto.py [header file] [footer file] (max PIN digits)'
@@ -224,12 +223,12 @@ def main(args):
 		cf = getCryptoData(footerFile)
 
 		for n in xrange(4, maxpin_digits+1):
-			result = bruteforcePIN(headerData, cf, n)
+			result = bruteforcePIN(headerData, cf, n, parseMagic)
 			if result: 
 				print 'Found PIN!: ' + result
 				break
 
-def bruteforcePIN(headerData, cryptoFooter, maxdigits):
+def bruteforcePIN(headerData, cryptoFooter, maxdigits, parseMagic):
 	print 'Trying to Bruteforce Password... please wait'
 
 	# try all possible 4 to maxdigits digit PINs, returns value immediately when found 
