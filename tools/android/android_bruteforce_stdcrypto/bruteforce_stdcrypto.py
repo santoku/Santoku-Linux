@@ -208,9 +208,9 @@ def main(args):
 		# check headerFile
 		fileSize = path.getsize(headerFile)
 		# for the NULL padding check, we need at least 32 bytes
-		assert(fileSize > 32), "Header file '%s' must be at least 32 bytes" % headerFile
+		assert(fileSize > 31), "Header file '%s' must be at least 32 bytes" % headerFile
 
-		if fileSize >= 1088:
+		if fileSize >= 1087:
 			parseMagic = True;
 			# load the header data for testing the password
 			headerData = open(headerFile, 'rb').read(1088)
@@ -260,10 +260,20 @@ def bruteforcePIN(headerData, cryptoFooter, maxdigits, parseMagic):
 
 		# has the test worked?
 		if parseMagic:
+			# ext4 superblock MAGIC and NULL padding present
+			if decData[1080:1082].encode("hex") == EXT4_MAGIC and decData[16:32] == "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0":
+				print "DBG: parseMagic"
+				return passwdTry
 			# ext4 superblock MAGIC (0xef53, little endian) present
 			if decData[1080:1082].encode("hex") == EXT4_MAGIC:
+				print "DBG: parseMagic"
+				return passwdTry
+			# NULL padding, after first block, present
+			elif decData[16:32] == "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0":
+				print "DBG: parseMagic"
 				return passwdTry
 		else:
+			print "DBG: no parseMagic"
 			# headerFile not large enough, only check for NULL padding of ext4 superblock
 			if decData[16:32] == "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0":
 				return passwdTry
