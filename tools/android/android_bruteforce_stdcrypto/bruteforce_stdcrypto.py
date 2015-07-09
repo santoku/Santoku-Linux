@@ -11,14 +11,17 @@
 # Footer is located in file userdata_footer on the efs partition
 #
 # --
-# Revision 0.3 (shipped with Santoku Alpha 0.3)
+# Revision 0.5 (Revision 0.3 shipped with Santoku Alpha 0.3)
 # ------------
 # Added support for more than 4-digit PINs
 # Speed improvements
 # ------------
-# 2014/5/14 Added 4.4 support (scrypt, etc.) [Nikolay Elenkov]
+# 2014/05/14 Added 4.4 support (scrypt, etc.) [Nikolay Elenkov]
 # ------------
-# 2015/6/29 Implemented ext4 Magic comparison [Oliver Kunz]
+# 2015/06/29 Implemented ext4 Magic comparison [Oliver Kunz]
+# ------------
+# 2015/07/09  Changed length check for header file [Oliver Kunz]
+#           Added more tests for decryption
 # -- 
 
 from os import path
