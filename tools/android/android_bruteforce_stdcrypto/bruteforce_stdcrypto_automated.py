@@ -266,7 +266,6 @@ def decryptData(decKey,essiv,data):
 
 
 def main():
-    print()
     if len(sys.argv) == 3:
         maxpin_digits = int(sys.argv[2])
     else:
